@@ -7,6 +7,11 @@
 
 typedef enum  {
   OP_CONSTANT, // needs to also know which constant to return, so two bytes: 1 for OpCode, 1 for index in constant pool (operand)
+  OP_NEGATE,
+  OP_ADD,
+  OP_SUBTRACT,
+  OP_MULTIPLY,
+  OP_DIVIDE,
   OP_RETURN, // doesn't need a bound value, so one byte
 } OpCode;
 
