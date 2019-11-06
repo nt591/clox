@@ -2,6 +2,7 @@
 #include "common.h"
 #include "debug.h"
 #include "vm.h"
+#include "compiler.h"
 
 // create one global VM object instead of a pointer to a VM that we pass around
 // this means we can't pass around a VM between applications, or initialize multiple VMs
@@ -85,9 +86,7 @@ static InterpretResult run() {
 #undef BINARY_OP
 }
 
-InterpretResult interpret(Chunk* chunk) {
-  vm.chunk = chunk;
-  // the instruction pointer is the code from the chunk we added
-  vm.ip = vm.chunk->code;
-  return run();
+InterpretResult interpret(const char* source) {
+  compile(source);
+  return INTERPRET_OK;
 }
