@@ -1,3 +1,4 @@
+#include <stdarg.h>
 #include <stdio.h>
 #include "common.h"
 #include "debug.h"
@@ -11,6 +12,20 @@ VM vm;
 static void resetStack() {
   // point stackTop to beginning of stack to indicate emptiness
   vm.stackTop = vm.stack;
+}
+
+static void runtimeError(const char* format, ...) {
+  va_list args;
+  va_start(args, format);
+  vfprintf(stderr, format, args);
+  va_end(args);
+  fputs("\n", stderr);
+
+  size_t instruction = vm.ip - vm.chunk->code;
+  int line = vm.chunk->lines[instruction];
+  fprintf(stderr, "[line %d] in script\n", line);
+
+  resetStack();
 }
 
 void initVM() {
@@ -36,15 +51,31 @@ Value pop() {
   return *vm.stackTop;
 }
 
+static Value peek(int distance) {
+  return vm.stackTop[-1 - distance];
+}
+
+static bool isFalsey(Value value) {
+  // a value is false if either it's nil OR
+  // if it's a bool, return the opposite value
+  // aka, false returns true for falsey, true returns false for falsiness
+  return IS_NIL(value) || (IS_BOOL(value) && !AS_BOOL(value));
+}
+
 static InterpretResult run() {
   // need a local macro to get the next instruction location and increment
 #define READ_BYTE() (*vm.ip++)
 #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
-#define BINARY_OP(op) \
+#define BINARY_OP(valueType, op) \
     do { \
-      double b = pop(); \
-      double a = pop(); \
-      push(a op b); \
+      if (!IS_NUMBER(peek(0)) || !IS_NUMBER(peek(1))) { \
+        runtimeError("Operands must be numbers."); \
+        return INTERPRET_RUNTIME_ERROR; \
+      } \
+      \
+      double b = AS_NUMBER(pop()); \
+      double a = AS_NUMBER(pop()); \
+      push(valueType(a op b)); \
     } while (false)
 
   for (;;) {
@@ -67,12 +98,34 @@ static InterpretResult run() {
         push(constant);
         break;
       }
+      case OP_NIL: push(NIL_VAL); break;
+      case OP_TRUE: push(BOOL_VAL(true)); break;
+      case OP_FALSE: push(BOOL_VAL(false)); break;
+      case OP_EQUAL: {
+        Value b = pop();
+        Value a = pop();
+        push(BOOL_VAL(valuesEqual(a, b)));
+        break;
+      }
       // pop the last seen value, negate it, push it back onto the stack
-      case OP_NEGATE: push(-pop()); break;
-      case OP_ADD: BINARY_OP(+); break;
-      case OP_SUBTRACT: BINARY_OP(-); break;
-      case OP_MULTIPLY: BINARY_OP(*); break;
-      case OP_DIVIDE: BINARY_OP(/); break;
+      case OP_NEGATE:
+        if (!IS_NUMBER(peek(0))) {
+          // top value on stack isn't a number, cannot negate
+          runtimeError("Operand must be a number.");
+          return INTERPRET_RUNTIME_ERROR;
+        }
+
+        push(NUMBER_VAL(-AS_NUMBER(pop())));
+        break;
+      case OP_GREATER: BINARY_OP(BOOL_VAL, >); break; // get the last two vals on the stack if they're numbers, and return a > b as a bool
+      case OP_LESS: BINARY_OP(BOOL_VAL, <); break;
+      case OP_ADD: BINARY_OP(NUMBER_VAL, +); break;
+      case OP_SUBTRACT: BINARY_OP(NUMBER_VAL, -); break;
+      case OP_MULTIPLY: BINARY_OP(NUMBER_VAL, *); break;
+      case OP_DIVIDE: BINARY_OP(NUMBER_VAL, /); break;
+      case OP_NOT:
+        push(BOOL_VAL(isFalsey(pop())));
+        break;
       case OP_RETURN: {
         printValue(pop());
         printf("\n");
