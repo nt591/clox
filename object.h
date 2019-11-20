@@ -30,6 +30,7 @@ struct sObjString {
   Obj obj;
   int length;
   char* chars;
+  uint32_t hash; // storing the hash code for a given string
 };
 
 ObjString* takeString(char* chars, int length);
