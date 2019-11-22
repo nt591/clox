@@ -19,6 +19,7 @@ typedef enum  {
   OP_MULTIPLY,
   OP_DIVIDE,
   OP_NOT,
+  OP_PRINT,
   OP_RETURN, // doesn't need a bound value, so one byte
 } OpCode;
 
