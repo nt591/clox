@@ -21,6 +21,6 @@ bool tableGet(Table* table, ObjString* key, Value* value); // take a pointer to 
 bool tableSet(Table* table, ObjString* key, Value value); // sets a value to a key in a table, overridding last val
 bool tableDelete(Table* table, ObjString* key);
 void tableAddAll(Table* from, Table* to);
-ObjString* tableFindString(Table* table, const char* chars, int length, u_int32_t hash);
+ObjString* tableFindString(Table* table, const char* chars, int length, uint32_t hash);
 
 #endif

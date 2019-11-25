@@ -21,6 +21,7 @@ typedef struct {
   Value stack[STACK_MAX];
   /// stack top starts at pointing to element 0, and ends at element just outside stack length
   Value* stackTop;
+  Table globals; // keeping our global variables and their values
   Table strings; // we're gonna intern our strings so when we compare, we can compare in memory
   Obj* objects; // point to head of list of objects for GC
 } VM;

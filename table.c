@@ -1,6 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
-
+#include <stdio.h>
 #include "memory.h"
 #include "object.h"
 #include "table.h"
@@ -23,6 +23,7 @@ static Entry* findEntry(Entry* entries, int capacity, ObjString* key) {
   //  First, we take the key’s hash code and map it to the array by taking it modulo the array size.
   // this should be the index in the array where the entry is
   uint32_t index = key->hash % capacity;
+
   Entry* tombstone = NULL;
 
   for (;;) {
@@ -40,7 +41,6 @@ static Entry* findEntry(Entry* entries, int capacity, ObjString* key) {
       // We found the key.
       return entry;
     }
-
     // linear probing -> look at next index
     index = (index + 1) % capacity;
     // can't end up in infinity loop cuz table max load forces SOME empty entries.
@@ -54,7 +54,6 @@ static void adjustCapacity(Table* table, int capacity) {
     entries[i].key = NULL;
     entries[i].value = NIL_VAL;
   }
-
 
   // to get rid of tombstones, we start a new table count
   table->count = 0;
@@ -78,10 +77,9 @@ static void adjustCapacity(Table* table, int capacity) {
 
 bool tableGet(Table* table, ObjString* key, Value* value) {
   if (table->count == 0) return false;
-
   Entry* entry = findEntry(table->entries, table->capacity, key);
-  if (entry->key == NULL) return false;
 
+  if (entry->key == NULL) return false;
   *value = entry->value;
   return true;
 }
@@ -93,11 +91,9 @@ bool tableSet(Table* table, ObjString* key, Value value) {
     adjustCapacity(table, capacity);
   }
   Entry* entry = findEntry(table->entries, table->capacity, key);
-
   bool isNewKey = entry->key == NULL;
   // only increment count when adding a new entry (that is, not a tombstone)
   if (isNewKey && IS_NIL(entry->value)) table->count++;
-
   entry->key = key;
   entry->value = value;
   return isNewKey;
@@ -130,22 +126,21 @@ void tableAddAll(Table* from, Table* to) {
 ObjString* tableFindString(Table* table, const char* chars, int length, uint32_t hash) {
   if (table->count == 0) return NULL;
 
-  u_int32_t index = hash % table->capacity;
+  uint32_t index = hash % table->capacity;
 
   for (;;) {
     Entry* entry = &table->entries[index];
 
     if (entry->key == NULL) {
-      // stop if empty non-tombstone entry
+      // Stop if we find an empty non-tombstone entry.
       if (IS_NIL(entry->value)) return NULL;
-    } else if (entry->key->length == length
-      && entry->key->hash == hash
-      && memcpy(entry->key->chars, chars, length) == 0) {
-        // if the key is the right length, the right hash, and the same values in memory, we got it
-        return entry->key;
-      }
+    } else if (entry->key->length == length &&
+        entry->key->hash == hash &&
+        memcmp(entry->key->chars, chars, length) == 0) {
+      // We found it.
+      return entry->key;
+    }
 
     index = (index + 1) % table->capacity;
-
   }
 }
