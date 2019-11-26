@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "common.h"
 #include "compiler.h"
@@ -40,7 +41,20 @@ typedef struct {
   Precedence precedence; // the precedence of the infix for a given token
 } ParseRule;
 
+typedef struct {
+  Token name; // identifier lexeme compares to local name
+  int depth;
+} Local;
+
+typedef struct Compiler {
+  Local locals[UINT8_COUNT]; // just keep my local variables in the order of declaration
+  int localCount; // how many local variables are in scope
+  int scopeDepth; // level of nesting for our scopes
+} Compiler;
+
 Parser parser;
+
+Compiler* current = NULL; // global parser so we don't need to pass a pointer through all our functions
 
 Chunk* compilingChunk;
 
@@ -137,6 +151,12 @@ static void emitConstant(Value value) {
   emitBytes(OP_CONSTANT, makeConstant(value));
 }
 
+static void initCompiler(Compiler* compiler) {
+  compiler->localCount = 0;
+  compiler->scopeDepth = 0;
+  current = compiler;
+}
+
 static void endCompiler() {
   // each pass of the compiler can handle one expression
   // every expression ends with a return
@@ -147,6 +167,25 @@ static void endCompiler() {
       disassembleChunk(currentChunk(), "code");
     }
   #endif
+}
+
+static void beginScope() {
+  current->scopeDepth++;
+}
+
+static void endScope() {
+  current->scopeDepth--;
+
+  // time to pop off variables off the VM stack
+  // as long as there are locals AND
+  // as long as the back of the stack has locals with a scope depth higher than current depth
+  // POP
+  while (current->localCount > 0 &&
+         current->locals[current->localCount - 1].depth >
+            current->scopeDepth) {
+    emitByte(OP_POP);
+    current->localCount--;
+  }
 }
 
 static void expression();
@@ -189,12 +228,88 @@ static uint8_t identifierConstant(Token* name) {
   return makeConstant(OBJ_VAL(copyString(name->start, name->length)));
 }
 
+static bool identifiersEqual(Token* a, Token* b) {
+  if (a->length != b->length) return false;
+  return memcmp(a->start, b->start, a->length) == 0;
+}
+
+static int resolveLocal(Compiler* compiler, Token* name) {
+  for (int i = compiler->localCount - 1; i >= 0; i--) {
+    Local* local = &compiler->locals[i];
+    if (identifiersEqual(name, &local->name)) {
+      if (local->depth == -1) {
+        error("Cannot read local variable in its own initializer.");
+      }
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+static void addLocal(Token name) {
+  // indexes are represented by one byte, or 2^8 valid indexes
+  if (current->localCount == UINT8_COUNT) {
+    error("Too many local variables in function.");
+    return;
+  }
+
+  Local* local = &current->locals[current->localCount++];
+  local->name = name;
+  local->depth = -1;
+  // creating a local involves incrementing the count of locals and getting the next one in the list
+}
+
+static void declareVariable() {
+  // globals are implicitly declared and latebound, so we dont need to declare early
+  if (current->scopeDepth == 0) return;
+
+  Token* name = &parser.previous;
+  // we want to make sure that when a variable is declared, it hasnt been declared in the same scope already
+  for (int i = current->localCount - 1; i >= 0; i--) {
+    Local* local = &current->locals[i];
+    if (local->depth != -1 && local->depth < current->scopeDepth) {
+      break;
+    }
+
+    if (identifiersEqual(name, &local->name)) {
+      error("Variable with this name already declared in this scope.");
+    }
+  }
+
+  addLocal(*name);
+}
+
 static uint8_t parseVariable(const char* errorMessage) {
   consume(TOKEN_IDENTIFIER, errorMessage);
+
+  declareVariable();
+  // if we're in some nested scope, it's a local variable
+  // at runtime, we dont need to persist in the global table
+  if (current->scopeDepth > 0) return 0;
   return identifierConstant(&parser.previous);
 }
 
+static void markInitialized() {
+  current->locals[current->localCount - 1].depth =
+      current->scopeDepth;
+}
+
 static void defineVariable(uint8_t global) {
+  /*
+    Wait, what? Yup. That’s it. There is no code to create a local variable at runtime.
+    Think about what state the VM is in.
+    It has already executed the code for the variable’s initializer
+    (or the implicit nil if the user omitted an initializer),
+    and that value is sitting right on top of the stack as the only remaining temporary.
+    We also know that new locals are allocated at the top of the stack… right where that value already is.
+    Thus, there’s nothing to do.
+    The temporary simply becomes the local variable. It doesn’t get much more efficient than that.
+  */
+  if (current->scopeDepth > 0) {
+    markInitialized();
+    return;
+  }
   emitBytes(OP_DEFINE_GLOBAL, global);
 }
 
@@ -260,13 +375,22 @@ static void string(bool canAssign) {
 }
 
 static void namedVariable(Token name, bool canAssign) {
-  uint8_t arg = identifierConstant(&name);
+  uint8_t getOp, setOp;
+  int arg = resolveLocal(current, &name);
+  if (arg != -1) {
+    getOp = OP_GET_LOCAL;
+    setOp = OP_SET_LOCAL;
+  } else {
+    arg = identifierConstant(&name);
+    getOp = OP_GET_GLOBAL;
+    setOp = OP_SET_GLOBAL;
+  }
   // if we see an equals sign, everything previous is an assignment
   if (canAssign && match(TOKEN_EQUAL)) {
     expression();
-    emitBytes(OP_SET_GLOBAL, arg);
+    emitBytes(setOp, (uint8_t)arg);
   } else {
-    emitBytes(OP_GET_GLOBAL, arg);
+    emitBytes(getOp, (uint8_t)arg);
   }
 }
 
@@ -412,6 +536,14 @@ static void declaration() {
   if (parser.panicMode) synchronize();
 }
 
+static void block() {
+  while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF)) {
+    declaration();
+  }
+
+  consume(TOKEN_RIGHT_BRACE, "Expect '}' after block.");
+}
+
 static void expressionStatement() {
   expression();
   consume(TOKEN_SEMICOLON, "Expect ';' after value.");
@@ -421,14 +553,19 @@ static void expressionStatement() {
 static void statement() {
   if (match(TOKEN_PRINT)) {
     printStatement();
+  } else if (match(TOKEN_LEFT_BRACE)) {
+    beginScope();
+    block();
+    endScope();
   } else {
-    // asserting that a statement is either a print or an expression
     expressionStatement();
   }
 }
 
 bool compile(const char* source, Chunk* chunk) {
   initScanner(source);
+  Compiler compiler;
+  initCompiler(&compiler);
   compilingChunk = chunk;
   parser.hadError = false;
   parser.panicMode = false;

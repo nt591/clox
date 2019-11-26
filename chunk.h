@@ -21,6 +21,8 @@ typedef enum  {
   OP_NOT,
   OP_PRINT,
   OP_POP,
+  OP_GET_LOCAL,
+  OP_SET_LOCAL,
   OP_GET_GLOBAL,
   OP_DEFINE_GLOBAL,
   OP_SET_GLOBAL,
