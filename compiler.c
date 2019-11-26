@@ -131,6 +131,14 @@ static void emitBytes(uint8_t byte1, uint8_t byte2) {
   emitByte(byte2);
 }
 
+static int emitJump(uint8_t instruction) {
+  emitByte(instruction);
+  // buffer 2**16 bytes so we can backpatch later
+  emitByte(0xff); // 2**8
+  emitByte(0xff); // 2**8
+  return currentChunk()->count - 2; // the offset of the instruction we emitted
+}
+
 static void emitReturn() {
   emitByte(OP_RETURN);
 }
@@ -149,6 +157,22 @@ static uint8_t makeConstant(Value value) {
 static void emitConstant(Value value) {
   // add constant instruction and value to chunk
   emitBytes(OP_CONSTANT, makeConstant(value));
+}
+
+static void patchJump(int offset) {
+  // how far do we know how to jump?
+  // the currentChunk()->count is where we are in bytecode for the statement (right after the then statement)
+  // offset is where in bytecode the OP_JUMP_IF_FALSE / OP_JUMP instruction is
+  // subtract two for length of OP_JUMP_IF_FALSE / OP_JUMP
+  int jump = currentChunk()->count - offset - 2;
+
+  if (jump > UINT16_MAX) {
+    error("Too much code to jump over.");
+  }
+
+  // replacing the buffers we set up with the actual operands
+  currentChunk()->code[offset] = (jump >> 8) & 0xff;
+  currentChunk()->code[offset + 1] = jump & 0xff;
 }
 
 static void initCompiler(Compiler* compiler) {
@@ -313,6 +337,18 @@ static void defineVariable(uint8_t global) {
   emitBytes(OP_DEFINE_GLOBAL, global);
 }
 
+static void and_(bool canAssign) {
+  // (1>0) and (2 > 1)
+  // at this point, (1>0) is already compiled
+  // so we look at top of stack and see, do we need to jump?
+  // if false, jump pase parsePrecendence
+  // else, we're good so pop and parse
+  int endJump = emitJump(OP_JUMP_IF_FALSE);
+  emitByte(OP_POP);
+  parsePrecedence(PREC_AND);
+  patchJump(endJump);
+}
+
 static void binary(bool canAssign) {
   // get the last token type
   TokenType operatorType = parser.previous.type;
@@ -360,6 +396,22 @@ static void number(bool canAssign) {
   // string to double, get the string value of the number from the parser
   double value = strtod(parser.previous.start, NULL);
   emitConstant(NUMBER_VAL(value));
+}
+
+static void or_(bool canAssign) {
+  // (1 > 0) or (1 < 0)
+  // at this time, leftside is compiled and top of stack
+  // since it's true, we can skip everything else
+  // so we jump all the way to the else
+  // if it IS false, we pop that value away and check the right side
+  int elseJump = emitJump(OP_JUMP_IF_FALSE);
+  int endJump = emitJump(OP_JUMP);
+
+  patchJump(elseJump);
+  emitByte(OP_POP);
+
+  parsePrecedence(PREC_OR);
+  patchJump(endJump);
 }
 
 static void string(bool canAssign) {
@@ -437,7 +489,7 @@ ParseRule rules[] = {
   { variable, NULL,    PREC_NONE },       // TOKEN_IDENTIFIER
   { string,   NULL,    PREC_NONE },       // TOKEN_STRING
   { number,   NULL,    PREC_NONE },       // TOKEN_NUMBER
-  { NULL,     NULL,    PREC_NONE },       // TOKEN_AND
+  { NULL,     and_,    PREC_AND },        // TOKEN_AND
   { NULL,     NULL,    PREC_NONE },       // TOKEN_CLASS
   { NULL,     NULL,    PREC_NONE },       // TOKEN_ELSE
   { literal,  NULL,    PREC_NONE },       // TOKEN_FALSE
@@ -445,7 +497,7 @@ ParseRule rules[] = {
   { NULL,     NULL,    PREC_NONE },       // TOKEN_FUN
   { NULL,     NULL,    PREC_NONE },       // TOKEN_IF
   { literal,  NULL,    PREC_NONE },       // TOKEN_NIL
-  { NULL,     NULL,    PREC_NONE },       // TOKEN_OR
+  { NULL,     or_,     PREC_OR },         // TOKEN_OR
   { NULL,     NULL,    PREC_NONE },       // TOKEN_PRINT
   { NULL,     NULL,    PREC_NONE },       // TOKEN_RETURN
   { NULL,     NULL,    PREC_NONE },       // TOKEN_SUPER
@@ -550,9 +602,39 @@ static void expressionStatement() {
   emitByte(OP_POP);
 }
 
+static void ifStatement() {
+  // gotta see a left paren, an expression, a right paren
+  consume(TOKEN_LEFT_PAREN, "Expect '(' after 'if'.");
+  expression();
+  consume(TOKEN_RIGHT_PAREN, "Expect ')' after condition.");
+
+  // if the condition is false, how far away is the bytecode for the false branch?
+  int thenJump = emitJump(OP_JUMP_IF_FALSE);
+  emitByte(OP_POP);
+  statement();
+
+  // we also want to make sure if condition was truthy, we jump over the else statement
+  // see https://craftinginterpreters.com/image/jumping-back-and-forth/if-else.png
+  // https://craftinginterpreters.com/image/jumping-back-and-forth/full-if-else.png
+  // tldr, in the true case our bytecode says "is true, do THEN clause, then elseJump will jump over the else statement"
+  // otherwise "is false, jump over then clause, do else clause"
+
+  // [ CONDITION, JUMP_TO_POP_AND_ELSE_IF_CONDITION_FALSE, OP_POP, DO_THE_TRUE_THING,
+  //  JUMP_OVER_ELSE_CLAUSE, OP_POP, ELSE_CLAUSE, WHAT_HAPPENS_AFTER_IF_STATEMENT...]
+  int elseJump = emitJump(OP_JUMP);
+  patchJump(thenJump);
+  emitByte(OP_POP);
+
+  // we also need to compile the else statement
+  if (match(TOKEN_ELSE)) statement();
+   patchJump(elseJump);
+}
+
 static void statement() {
   if (match(TOKEN_PRINT)) {
     printStatement();
+  } else if (match(TOKEN_IF)) {
+    ifStatement();
   } else if (match(TOKEN_LEFT_BRACE)) {
     beginScope();
     block();
