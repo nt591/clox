@@ -130,7 +130,7 @@ static TokenType identifierType() {
     // AND that is matches 'nd'
     case 'a': return checkKeyword(1, 2, "nd", TOKEN_AND);
     case 'c': return checkKeyword(1, 4, "lass", TOKEN_CLASS);
-    case 'e': return checkKeyword(1, 3, "else", TOKEN_ELSE);
+    case 'e': return checkKeyword(1, 3, "lse", TOKEN_ELSE);
     // multiple keywords start with 'f'
     case 'f':
       // is there a second letter in this lexeme?

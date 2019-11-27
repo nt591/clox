@@ -216,7 +216,7 @@ static InterpretResult run() {
         // look at the top of the stack
         // if it's false, increment IP by the offset (aka skip the then branch, go to else branch)
         // otherwise, continue to then branch
-        if (IS_FALSEY(peek(0))) vm.ip += offset;
+        if (isFalsey(peek(0))) vm.ip += offset;
         break;
       }
       case OP_LOOP: {

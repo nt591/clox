@@ -638,10 +638,9 @@ static void ifStatement() {
   int elseJump = emitJump(OP_JUMP);
   patchJump(thenJump);
   emitByte(OP_POP);
-
   // we also need to compile the else statement
   if (match(TOKEN_ELSE)) statement();
-   patchJump(elseJump);
+  patchJump(elseJump);
 }
 
 static void whileStatement() {
