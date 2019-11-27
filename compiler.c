@@ -131,6 +131,20 @@ static void emitBytes(uint8_t byte1, uint8_t byte2) {
   emitByte(byte2);
 }
 
+static void emitLoop(int loopStart) {
+  emitByte(OP_LOOP);
+
+  // how far do we jump back?
+  // we need to see where we are now, and where we started the loop
+  // the difference is how far back we need to jump back
+  // add two for the OP_LOOP operands
+  int offset = currentChunk()->count - loopStart + 2;
+  if (offset > UINT16_MAX) error("Loop body too large.");
+
+  emitByte((offset >> 8) & 0xff);
+  emitByte(offset & 0xff);
+}
+
 static int emitJump(uint8_t instruction) {
   emitByte(instruction);
   // buffer 2**16 bytes so we can backpatch later
@@ -630,11 +644,87 @@ static void ifStatement() {
    patchJump(elseJump);
 }
 
+static void whileStatement() {
+  int loopStart = currentChunk()->count; // where in the bytecode does this loop start;
+  consume(TOKEN_LEFT_PAREN, "Expect '(' after while.");
+  expression();
+  consume(TOKEN_RIGHT_PAREN, "Expect ')' after condition.");
+
+  // set up my jump over the logic if it's false
+  int exitJump = emitJump(OP_JUMP_IF_FALSE);
+  emitByte(OP_POP); // throw away the true evaluation from the condition
+  statement();
+
+  // since we know at this point, condition was true, do the statement and jump back to the top
+  emitLoop(loopStart);
+
+  patchJump(exitJump);
+  emitByte(OP_POP); // throw away the false evaluation from the condition
+}
+
+static void forStatement() {
+  beginScope();
+  consume(TOKEN_LEFT_PAREN, "Expect '(' after for.");
+
+  // since variable initialization is optional, we need to check the first clauses
+  if (match(TOKEN_SEMICOLON)) {
+    // No initializer.
+  } else if (match(TOKEN_VAR)) {
+    varDeclaration();
+  } else {
+    expressionStatement();
+  }
+
+  // now we have the optional exit condition, e.g x < 10
+  int loopStart = currentChunk()->count;
+  int exitJump = -1;
+  if (!match(TOKEN_SEMICOLON)) {
+    // we have an exit condition since there's a non-semicolon
+    // evaluate the condition, look for the next semicolon, then check if truthy and set jump
+
+    expression();
+    consume(TOKEN_SEMICOLON, "Expect ';'.");
+
+    exitJump = emitJump(OP_JUMP_IF_FALSE);
+    emitByte(OP_POP); // get rid of the condition if true
+  }
+
+
+  // now, optional incrementation clause for our optional variable
+  if (!match(TOKEN_RIGHT_PAREN)) {
+    //https://craftinginterpreters.com/image/jumping-back-and-forth/for.png
+    // we're inside a incrementer
+    // we jump over the increment, evaluate the body, come back to increment, then re-do the loop
+    int bodyJump = emitJump(OP_JUMP);
+
+    int incrementStart = currentChunk()->count;
+    expression(); // the increment, e.g x++;
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after for clauses.");
+
+    emitLoop(loopStart);
+    loopStart = incrementStart;
+    patchJump(bodyJump);
+  }
+
+  statement();
+  emitLoop(loopStart);
+
+  if (exitJump != -1) {
+    patchJump(exitJump);
+    emitByte(OP_POP); // Condition if false
+  }
+  endScope();
+}
+
 static void statement() {
   if (match(TOKEN_PRINT)) {
     printStatement();
+  } else if (match(TOKEN_FOR)) {
+    forStatement();
   } else if (match(TOKEN_IF)) {
     ifStatement();
+  }  else if (match(TOKEN_WHILE)) {
+    whileStatement();
   } else if (match(TOKEN_LEFT_BRACE)) {
     beginScope();
     block();
