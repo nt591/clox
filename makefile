@@ -1,4 +1,3 @@
-CC=clang
 SOURCES := $(wildcard *.c)
 HEADERS := $(wildcard *.h)
 OBJECTS := $(SOURCES:.c=.o)
