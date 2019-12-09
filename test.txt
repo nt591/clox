@@ -1,0 +1,16 @@
+{
+  var x = 1;
+  if (x > 2) {
+    x = 5;
+  } else {
+    x = 10;
+  }
+
+  print x;
+
+  fun areWeHavingItYet() {
+    print "Yes we are!";
+  }
+
+  print areWeHavingItYet;
+}
