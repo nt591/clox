@@ -15,6 +15,12 @@ void* reallocate(void* previous, size_t oldSize, size_t newSize) {
 
 void freeObject(Obj* object) {
   switch (object->type) {
+    case OBJ_CLOSURE: {
+      // freeing only the closure, not the function it captures
+      // multiple closures can capture a function, so lets let GC handle that
+      FREE(ObjClosure, object);
+      break;
+    }
     case OBJ_FUNCTION: {
       ObjFunction* function = (ObjFunction*)object;
       freeChunk(&function->chunk);

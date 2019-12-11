@@ -35,7 +35,7 @@ static void runtimeError(const char* format, ...) {
   // retern error callstack from most recent to least recent
   for (int i = vm.frameCount - i; i <= 0; i--) {
     CallFrame* frame = &vm.frames[i];
-    ObjFunction* function = frame->function;
+    ObjFunction* function = frame->closure->function;
 
     // -1 because IP is sitting on next instruction to execute
     // where is frame IP (aka 100) minus where is all the function code (aka 60)
@@ -98,9 +98,9 @@ static Value peek(int distance) {
   return vm.stackTop[-1 - distance];
 }
 
-static bool call(ObjFunction* function, int argCount) {
-  if (argCount != function->arity) {
-    runtimeError("Expected %d arguments but got %d", function->arity, argCount);
+static bool call(ObjClosure* closure, int argCount) {
+  if (argCount != closure->function->arity) {
+    runtimeError("Expected %d arguments but got %d", closure->function->arity, argCount);
     return false;
   }
 
@@ -111,8 +111,8 @@ static bool call(ObjFunction* function, int argCount) {
   }
 
   CallFrame* frame = &vm.frames[vm.frameCount++];
-  frame->function = function;
-  frame->ip = function->chunk.code;
+  frame->closure = closure;
+  frame->ip = closure->function->chunk.code;
 
   /*
     This simply initializes the next CallFrame on the stack.
@@ -131,8 +131,9 @@ static bool call(ObjFunction* function, int argCount) {
 static bool callValue(Value callee, int argCount) {
   if (IS_OBJ(callee)) {
     switch (OBJ_TYPE(callee)) {
-      case OBJ_FUNCTION:
-        return call(AS_FUNCTION(callee), argCount);
+      case OBJ_CLOSURE: {
+        return call(AS_CLOSURE(callee), argCount);
+      }
       case OBJ_NATIVE: {
         NativeFn native = AS_NATIVE(callee);
         Value result = native(argCount, vm.stackTop - argCount);
@@ -178,7 +179,7 @@ static InterpretResult run() {
 #define READ_SHORT() \
     (frame->ip += 2, (uint16_t)((frame->ip[-2] << 8) | frame->ip[-1]))
 #define READ_CONSTANT() \
-    (frame->function->chunk.constants.values[READ_BYTE()])
+    (frame->closure->function->chunk.constants.values[READ_BYTE()])
 #define READ_STRING() AS_STRING(READ_CONSTANT())
 #define BINARY_OP(valueType, op) \
     do { \
@@ -202,8 +203,8 @@ static InterpretResult run() {
       }
       printf("\n");
       // cast frame->IP to an int, then get it's relative position by subtracting where the code is
-      disassembleInstruction(&frame->function->chunk,
-        (int)(frame->ip - frame->function->chunk.code));
+      disassembleInstruction(&frame->closure->function->chunk,
+        (int)(frame->ip - frame->closure->function->chunk.code));
     #endif
 
     uint8_t instruction;
@@ -325,6 +326,13 @@ static InterpretResult run() {
         frame = &vm.frames[vm.frameCount - 1];
         break;
       }
+      case OP_CLOSURE: {
+        // emitBytes(OP_CLOSURE, second arg is location in constant pool of compiled function)
+        ObjFunction* function = AS_FUNCTION(READ_CONSTANT());
+        ObjClosure* closure = newClosure(function);
+        push(OBJ_VAL(closure));
+        break;
+      }
       case OP_RETURN: {
         // when we return from a function, the result of the fn is on top
         Value result = pop();
@@ -359,13 +367,16 @@ InterpretResult interpret(const char* source) {
     if nothing, compilation error so throw it away
     else, store the function on the stack.
     THEN, set up the function with a new framecount, the slots from the VM stack
-
   */
   ObjFunction* function = compile(source);
   if (function == NULL) return INTERPRET_COMPILE_ERROR;
 
   push(OBJ_VAL(function));
-  callValue(OBJ_VAL(function), 0); // set up first frame for top level code
+  // setup first frame with closure
+  ObjClosure* closure = newClosure(function);
+  pop();
+  push(OBJ_VAL(closure));
+  callValue(OBJ_VAL(closure), 0); // set up first frame for top level code
 
   return run();
 }
