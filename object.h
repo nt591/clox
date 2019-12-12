@@ -23,6 +23,7 @@ typedef enum {
   OBJ_FUNCTION,
   OBJ_NATIVE,
   OBJ_STRING,
+  OBJ_UPVALUE,
 } ObjType;
 
 struct sObj {
@@ -34,6 +35,7 @@ struct sObj {
 typedef struct {
   Obj obj;
   int arity;
+  int upvalueCount;
   Chunk chunk;
   ObjString* name;
 } ObjFunction;
@@ -60,10 +62,20 @@ struct sObjString {
   uint32_t hash; // storing the hash code for a given string
 };
 
+// runtime representation of our Upvalue objects
+typedef struct sUpvalue {
+  Obj obj;
+  Value* location; // pointer to where the variable is in bytecode
+} ObjUpvalue;
+
 // all functions are wrapped by closures, even if they don't capture any values
 typedef struct {
   Obj obj;
   ObjFunction* function;
+  // upvalues are dynamically allocated, so we need pointer
+  // closure's array of upvalues is therefore also dynamic, so we need double pointer
+  ObjUpvalue** upvalues;
+  int upvalueCount;
 } ObjClosure;
 
 ObjClosure* newClosure(ObjFunction* function);
@@ -76,6 +88,8 @@ ObjNative* newNative(NativeFn function);
 ObjString* takeString(char* chars, int length);
 
 ObjString* copyString(const char* chars, int length);
+ObjUpvalue* newUpvalue(Value* slot);
+
 void printObject(Value value);
 
 static inline bool isObjType(Value value, ObjType type) {
