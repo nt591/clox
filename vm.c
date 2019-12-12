@@ -23,6 +23,7 @@ static void resetStack() {
   // point stackTop to beginning of stack to indicate emptiness
   vm.stackTop = vm.stack;
   vm.frameCount = 0;
+  vm.openUpvalues = NULL;
 }
 
 static void runtimeError(const char* format, ...) {
@@ -152,8 +153,45 @@ static bool callValue(Value callee, int argCount) {
 }
 
 static ObjUpvalue* captureUpvalue(Value* local) {
+  // before creating an upvalue, we need to see
+  // if we've already captured it in the linked list
+  // (aka, a variable another same-scoped closure captured)
+  ObjUpvalue* prevUpvalue = NULL;
+  ObjUpvalue* upvalue = vm.openUpvalues; // head of linked list
+
+  while (upvalue != NULL && upvalue->location > local) {
+    // keep traversing linked list until we find a bytecode location equal to or before local
+    prevUpvalue = upvalue;
+    upvalue = upvalue->next;
+  }
+
+  // if the upvalue location is the same as the location of the captured local, just return the same one
+  if (upvalue != NULL && upvalue->location == local) return upvalue;
+
   ObjUpvalue* createdUpvalue = newUpvalue(local);
+  createdUpvalue->next = upvalue;
+  // if this is the top of the stack of upvalues, then the head of the VM's list is the new value
+  if (prevUpvalue == NULL) {
+    vm.openUpvalues = createdUpvalue;
+  } else {
+    prevUpvalue->next = createdUpvalue;
+  }
+
   return createdUpvalue;
+}
+
+static void closeUpvalues(Value* last) {
+  // mark every upvalue at this slot or above in the stack as closed
+  while (vm.openUpvalues != NULL && vm.openUpvalues->location >= last) {
+    ObjUpvalue* upvalue = vm.openUpvalues;
+    // copy the variable's value (from bytecode) into the closed field
+    // location is a pointer to a value, closed is the actual value
+    upvalue->closed = *upvalue->location;
+    // then point location to the address of closed
+    // https://craftinginterpreters.com/image/closures/closing.png
+    upvalue->location = &upvalue->closed;
+    vm.openUpvalues = upvalue->next;
+  }
 }
 
 static bool isFalsey(Value value) {
@@ -382,6 +420,9 @@ static InterpretResult run() {
       case OP_RETURN: {
         // when we return from a function, the result of the fn is on top
         Value result = pop();
+        // make sure to close the variables that this function needs
+        // frame->slots is the first slot in the stack, so anything after it will be captured
+        closeUpvalues(frame->slots);
         vm.frameCount--;
 
         // if there are no more frames, then we pop the entire stack AKA close the interpreter
@@ -395,6 +436,13 @@ static InterpretResult run() {
         push(result);
 
         frame = &vm.frames[vm.frameCount - 1]; // the precending frame, the one before the function we returned from
+        break;
+      }
+      case OP_CLOSE_UPVALUE: {
+        // when we see this op code, the value we want to close is the top of the stack
+        closeUpvalues(vm.stackTop - 1);
+        // once it's closed and moved to the heap, get it off the stack
+        pop();
         break;
       }
     }

@@ -66,6 +66,8 @@ struct sObjString {
 typedef struct sUpvalue {
   Obj obj;
   Value* location; // pointer to where the variable is in bytecode
+  Value closed; // when we close over a variable, we need to hold onto it
+  struct sUpvalue* next; // holding onto a linked list of upvalues for our VM
 } ObjUpvalue;
 
 // all functions are wrapped by closures, even if they don't capture any values

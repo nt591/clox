@@ -35,6 +35,7 @@ typedef struct {
   Value* stackTop;
   Table globals; // keeping our global variables and their values
   Table strings; // we're gonna intern our strings so when we compare, we can compare in memory
+  ObjUpvalue* openUpvalues; // a linked list of open upvalues https://craftinginterpreters.com/image/closures/linked-list.png
   Obj* objects; // point to head of list of objects for GC
 } VM;
 

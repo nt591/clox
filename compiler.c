@@ -44,6 +44,8 @@ typedef struct {
 typedef struct {
   Token name; // identifier lexeme compares to local name
   int depth;
+  // a local is captured if, a function inside the curr function has an upvalue that resolves to the local
+  bool isCaptured;
 } Local;
 
 typedef struct {
@@ -233,6 +235,7 @@ static void initCompiler(Compiler* compiler, FunctionType type) {
   // VM claims the top of the locals stack for itself
   Local* local = &current->locals[current->localCount++];
   local->depth = 0;
+  local->isCaptured = false;
   local->name.start = "";
   local->name.length = 0;
 }
@@ -272,7 +275,13 @@ static void endScope() {
   while (current->localCount > 0 &&
          current->locals[current->localCount - 1].depth >
             current->scopeDepth) {
-    emitByte(OP_POP);
+    // if the local in question has been captured, we move to the heap and hold onto it for later
+    // else, pop it off
+    if (current->locals[current->localCount - 1].isCaptured) {
+      emitByte(OP_CLOSE_UPVALUE);
+    } else {
+      emitByte(OP_POP);
+    }
     current->localCount--;
   }
 }
@@ -369,6 +378,8 @@ static int resolveUpvalue(Compiler* compiler, Token* name) {
   int local = resolveLocal(compiler->enclosing, name);
   // if we found the local in the enclosing function
   if (local != -1) {
+    // mark the local as captured
+    compiler->enclosing->locals[local].isCaptured = true;
     return addUpvalue(compiler, (uint8_t)local, true);
   }
 
@@ -390,10 +401,11 @@ static void addLocal(Token name) {
     return;
   }
 
+  // creating a local involves incrementing the count of locals and getting the next one in the list
   Local* local = &current->locals[current->localCount++];
   local->name = name;
   local->depth = -1;
-  // creating a local involves incrementing the count of locals and getting the next one in the list
+  local->isCaptured = false;
 }
 
 static void declareVariable() {
