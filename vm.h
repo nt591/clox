@@ -37,6 +37,9 @@ typedef struct {
   Table strings; // we're gonna intern our strings so when we compare, we can compare in memory
   ObjUpvalue* openUpvalues; // a linked list of open upvalues https://craftinginterpreters.com/image/closures/linked-list.png
   Obj* objects; // point to head of list of objects for GC
+  int grayCount;
+  int grayCapacity;
+  Obj** grayStack;
 } VM;
 
 typedef enum {

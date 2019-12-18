@@ -28,6 +28,7 @@ typedef enum {
 
 struct sObj {
   ObjType type;
+  bool isMarked;
   struct sObj* next;  // create a linked list of objects as they're created so we can later free memory when not in use
 };
 

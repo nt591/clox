@@ -14,11 +14,17 @@ static Obj* allocateObject(size_t size, ObjType type) {
   // the caller knows the size of the underlying type, so it passes that in
   Obj* object = (Obj*)reallocate(NULL, 0, size);
   object->type = type;
-
+  object->isMarked = false;
   // vm holds onto the head of the linked list, so every new object becomes the head,
   // and we point the new head to the old head
   object->next = vm.objects;
   vm.objects = object;
+
+
+#ifdef DEBUG_LOG_GC
+  printf("%p allocate %ld for %d\n", (void*)object, size, type);
+#endif
+
   return object;
 }
 
