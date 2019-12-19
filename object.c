@@ -64,8 +64,12 @@ static ObjString* allocateString(char* chars, int length, uint32_t hash) {
   string->chars = chars;
   string->hash = hash;
 
+  // adding to the table can trigger reallocation
+  // reallocation triggers GC
+  // if it GC's, string isn't reachable from a root so it'll get swept so we need to protect in the stack
+  push(OBJ_VAL(string));
   tableSet(&vm.strings, string, NIL_VAL); // store in a hash table every string we see for the VM
-
+  pop();
   return string;
 }
 

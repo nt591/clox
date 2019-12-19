@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include "chunk.h"
 #include "memory.h"
+#include "vm.h"
 
 void initChunk(Chunk* chunk) {
   chunk->count = 0;
@@ -27,7 +28,11 @@ void writeChunk(Chunk* chunk, uint8_t byte, int line) {
 }
 
 int addConstant(Chunk* chunk, Value value) {
+  // it's possible that when we write the array, we might need to grow the array and reallocate
+  // which triggers a GC. In order to make sure the value doesn't get GC's, we push it to the stack first
+  push(value);
   writeValueArray(&chunk->constants, value);
+  pop();
   // return index of last added constant
   return chunk->constants.count - 1;
 }

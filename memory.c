@@ -9,11 +9,21 @@
 #include "debug.h"
 #endif
 
+#define GC_HEAP_GROW_FACTOR 2
+
 void* reallocate(void* previous, size_t oldSize, size_t newSize) {
+  // adjust vm bytesAllocated by the difference in old and new sizes
+  // aka, if the new size of an array is 10bytes, and the old is 9 bytes, we add 1 byte to bytesAllocated
+  vm.bytesAllocated += newSize - oldSize;
+
   if (newSize > oldSize) {
     #ifdef DEBUG_STRESS_GC
       collectGarbage();
     #endif
+
+    if (vm.bytesAllocated > vm.nextGC) {
+      collectGarbage();
+    }
   }
   if (newSize == 0) {
     free(previous);
@@ -196,6 +206,7 @@ static void sweep() {
 void collectGarbage() {
 #ifdef DEBUG_LOG_GC
   printf("--- gc begin\n");
+  size_t before = vm.bytesAllocated;
 #endif
 
   markRoots();
@@ -203,7 +214,15 @@ void collectGarbage() {
   tableRemoveWhite(&vm.strings);
   sweep();
 
+  // every time we GC, we see how much WASN'T collected and set the threshold to some multiple
+  // if we have a lot of live objects, we'll GC infrequently to keep throughput high
+  // if we have few live objects, we'll GC more frequently to keep latency high
+  vm.nextGC = vm.bytesAllocated * GC_HEAP_GROW_FACTOR;
+
 #ifdef DEBUG_LOG_GC
   printf("--- gc end\n");
+  printf("   collected %ld bytes (from %ld to %ld) next at %ld\n",
+          before - vm.bytesAllocated, before, vm.bytesAllocated,
+          vm.nextGC);
 #endif
 }

@@ -36,6 +36,10 @@ typedef struct {
   Table globals; // keeping our global variables and their values
   Table strings; // we're gonna intern our strings so when we compare, we can compare in memory
   ObjUpvalue* openUpvalues; // a linked list of open upvalues https://craftinginterpreters.com/image/closures/linked-list.png
+
+  size_t bytesAllocated; // how many bytes of managed memory do we have
+  size_t nextGC; // how many bytes do we need to allocate before the next GC is triggereed
+
   Obj* objects; // point to head of list of objects for GC
   int grayCount;
   int grayCapacity;

@@ -68,6 +68,8 @@ static void defineNative(const char* name, NativeFn function) {
 void initVM() {
   resetStack();
   vm.objects = NULL;
+  vm.bytesAllocated = 0;
+  vm.nextGC = 1024 * 1024; // just an arbitrary number
   vm.grayCount = 0;
   vm.grayCapacity = 0;
   vm.grayStack = NULL;
@@ -205,8 +207,11 @@ static bool isFalsey(Value value) {
 }
 
 static void concatenate() {
-  ObjString* b = AS_STRING(pop());
-  ObjString* a = AS_STRING(pop());
+  // we could pop the strings off the stack, but insteaf we'll peek them so they stay on the stack
+  // the reason is that when we create the concatenated version, it gets added to the table
+  // adding to a table can trigger a GC, which would sweep away our base strings since they'd be off the stack if popped
+  ObjString* b = AS_STRING(peek(0));
+  ObjString* a = AS_STRING(peek(1));
 
   int length = a->length + b->length;
   char* chars = ALLOCATE(char, length + 1); // + 1 for null char
@@ -215,6 +220,8 @@ static void concatenate() {
   chars[length] = '\0';
 
   ObjString* result = takeString(chars, length);
+  pop(); // get rid of b
+  pop(); // get rid of a
   push(OBJ_VAL(result));
 }
 
