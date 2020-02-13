@@ -448,6 +448,10 @@ static InterpretResult run() {
         frame = &vm.frames[vm.frameCount - 1]; // the precending frame, the one before the function we returned from
         break;
       }
+      case OP_CLASS: {
+        push(OBJ_VAL(newClass(READ_STRING())));
+        break;
+      }
       case OP_CLOSE_UPVALUE: {
         // when we see this op code, the value we want to close is the top of the stack
         closeUpvalues(vm.stackTop - 1);
